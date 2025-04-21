@@ -25,9 +25,25 @@ ppt-summary-maker/
 
 ## Tech Stack
 
-- **Backend:** Python, FastAPI
+- **Backend:** Python (FastAPI), Uvicorn, python-docx, PyMuPDF, Hugging Face Transformers, python-pptx
 - **Frontend:** React.js
 - **Other Tools:** Node.js, npm, Python Virtual Environment, Git
+
+## Backend Technologies
+
+- **FastAPI**: Modern, high-performance web framework for building APIs, with automatic Swagger documentation.
+- **Uvicorn**: ASGI server for running the FastAPI app.
+- **Document Parsing**: 
+  - `python-docx` for `.docx` files.
+  - `PyMuPDF (fitz)` for `.pdf` files.
+- **Summarization**:
+  - Hugging Face `transformers` for using pre-trained models like BART, T5, or Pegasus.
+- **Presentation Generation**:
+  - `python-pptx` for dynamically creating `.pptx` files from summarized content.
+- **Environment Configuration**:
+  - `python-dotenv` for managing environment variables securely.
+- **Optional Async Handling**:
+  - FastAPI’s Background Tasks or Celery with Redis for long-running summarization processes.
 
 ## Setup Instructions
 
@@ -101,5 +117,4 @@ Initialize Git (if not already done):
 ```bash
 git init
 ```
-
 
