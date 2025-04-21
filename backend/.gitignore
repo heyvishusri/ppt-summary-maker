@@ -1,0 +1,24 @@
+# Virtual Environment
+venv/
+
+# Python cache files
+*.pyc
+__pycache__/
+
+# Environment variables file
+.env*
+
+# VS Code specific settings (for this sub-project)
+.vscode/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor backup files
+*.swp
+*~
+
+# Temporary or generated files (add specific folders later)
+temp_uploads/
+generated_ppts/
