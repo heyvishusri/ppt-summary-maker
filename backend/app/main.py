@@ -1,9 +1,11 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse
 import uvicorn
 import os
 import shutil
-import time # To create unique filenames if needed
+import time
+import uuid  # For generating unique task IDs
 from dotenv import load_dotenv
 
 # Import the service functions
@@ -17,7 +19,7 @@ origins = [
     "http://localhost:3000",
 ]
 
-app = FastAPI(title="PPT Summary Maker API")
+app = FastAPI(title="PPT Summary Maker API - Async")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,36 +31,137 @@ app.add_middleware(
 
 # Directories (Consider making these configurable via .env)
 UPLOAD_DIRECTORY = "./temp_uploads"
-OUTPUT_DIRECTORY = "./generated_ppts" # Directory for generated PPTs
+OUTPUT_DIRECTORY = "./generated_ppts"  # Directory for generated PPTs
 
 # Ensure directories exist
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
 
+# --- In-Memory Task Status Tracking (Simple Example) ---
+# WARNING: This is NOT production-ready. Statuses are lost on server restart.
+# Use Redis, Celery results backend, or a database for persistence.
+task_statuses = {}
+# Example structure:
+# task_statuses = {
+#    "task-id-123": {"status": "PROCESSING"},
+#    "task-id-456": {"status": "COMPLETED", "output_filename": "Summary_report.pptx"},
+#    "task-id-789": {"status": "FAILED", "error": "Failed to parse document"},
+# }
+# ---
+
+
+# --- Background Processing Function ---
+def process_document_background(
+    task_id: str, temp_file_path: str, original_filename: str
+):
+    """
+    This function runs in the background to process the document.
+    It updates the task_statuses dictionary upon completion or failure.
+    """
+    print(f"[Task {task_id}] Background processing started for: {original_filename}")
+    extracted_text = ""
+    summary = ""
+    ppt_filepath = ""
+    output_filename = ""
+
+    try:
+        # --- 1. Parse Text ---
+        print(f"[Task {task_id}] Parsing file: {temp_file_path}")
+        extracted_text = extract_text_from_file(temp_file_path)
+        if not extracted_text:
+            raise ValueError(
+                "Could not extract text from the document or the document is empty."
+            )
+        print(
+            f"[Task {task_id}] Extracted text length: {len(extracted_text)} characters"
+        )
+
+        # --- 2. Summarize Text ---
+        MAX_CHARS_FOR_SUMMARY = 10000  # Example limit
+        text_to_summarize = extracted_text[:MAX_CHARS_FOR_SUMMARY]
+        if len(extracted_text) > MAX_CHARS_FOR_SUMMARY:
+            print(
+                f"[Task {task_id}] Warning: Input text truncated to {MAX_CHARS_FOR_SUMMARY} chars for summarization."
+            )
+
+        print(f"[Task {task_id}] Starting summarization...")
+        # Update status to indicate summarization step (optional detail)
+        # task_statuses[task_id] = {"status": "SUMMARIZING"}
+        summary = summarize_text(text_to_summarize)
+        if not summary:
+            raise RuntimeError("Failed to generate summary (empty result).")
+        print(f"[Task {task_id}] Summarization complete.")
+
+        # --- 3. Generate PPT ---
+        print(f"[Task {task_id}] Generating PPT...")
+        # Update status (optional detail)
+        # task_statuses[task_id] = {"status": "GENERATING_PPT"}
+        ppt_filepath = create_summary_ppt(summary, original_filename, OUTPUT_DIRECTORY)
+        output_filename = os.path.basename(ppt_filepath)
+        print(f"[Task {task_id}] PPT generated at: {ppt_filepath}")
+
+        # --- 4. Update Status to COMPLETED ---
+        task_statuses[task_id] = {
+            "status": "COMPLETED",
+            "output_filename": output_filename,
+            # "summary": summary # Optionally include summary if needed by frontend later
+        }
+        print(f"[Task {task_id}] Processing COMPLETED.")
+
+    except Exception as e:
+        # --- Handle Errors and Update Status to FAILED ---
+        error_message = f"Processing failed: {e}"
+        print(f"[Task {task_id}] {error_message}")
+        task_statuses[task_id] = {"status": "FAILED", "error": str(e)}
+
+    finally:
+        # --- 5. Cleanup Temporary Uploaded File ---
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                print(f"[Task {task_id}] Cleaned up temporary file: {temp_file_path}")
+            except OSError as e:
+                print(
+                    f"[Task {task_id}] Error deleting temporary file {temp_file_path}: {e}"
+                )
+
+
+# --- API Endpoints ---
+
 
 @app.get("/")
 async def read_root():
-    """ Root endpoint """
-    return {"message": "Welcome to the PPT Summary Maker API!"}
+    """Root endpoint"""
+    return {"message": "Welcome to the PPT Summary Maker API! (Async Version)"}
 
 
-@app.post("/summarize")
-async def summarize_document_endpoint(file: UploadFile = File(...)):
+@app.post("/summarize", status_code=202)  # Use 202 Accepted status code
+async def summarize_document_endpoint(
+    background_tasks: BackgroundTasks,  # Inject BackgroundTasks
+    file: UploadFile = File(...),
+):
     """
-    Receives a document, extracts text, summarizes it, creates a PPT,
-    and returns the summary text (for now).
+    Accepts a document, saves it, schedules background processing,
+    and returns a task ID immediately.
     """
     if not file:
         raise HTTPException(status_code=400, detail="No file uploaded.")
 
-    allowed_content_types = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+    allowed_content_types = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]
     if file.content_type not in allowed_content_types:
-        raise HTTPException(status_code=400, detail=f"Invalid file type: {file.content_type}. Only PDF and DOCX are allowed.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {file.content_type}. Only PDF and DOCX allowed.",
+        )
 
-    # --- 1. Save Uploaded File Temporarily ---
-    # Use a more unique temporary filename to avoid conflicts
+    # --- 1. Save Uploaded File Temporarily with Unique Name ---
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    temp_filename = f"{timestamp}_{file.filename}"
+    # Incorporate a unique ID in the temp filename in case of simultaneous uploads
+    unique_id = uuid.uuid4().hex[:8]
+    temp_filename = f"{timestamp}_{unique_id}_{file.filename}"
     temp_file_path = os.path.join(UPLOAD_DIRECTORY, temp_filename)
 
     try:
@@ -66,71 +169,62 @@ async def summarize_document_endpoint(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
         print(f"Error saving uploaded file: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not save uploaded file: {file.filename}")
+        raise HTTPException(
+            status_code=500, detail=f"Could not save uploaded file: {file.filename}"
+        )
     finally:
-        await file.close() # Close the upload stream
+        await file.close()
 
-    extracted_text = ""
-    summary = ""
-    ppt_filepath = ""
+    # --- 2. Generate Task ID and Set Initial Status ---
+    task_id = str(uuid.uuid4())
+    task_statuses[task_id] = {"status": "PROCESSING"}  # Set initial status
 
-    try:
-        # --- 2. Parse Text from File ---
-        print(f"Parsing file: {temp_file_path}")
-        extracted_text = extract_text_from_file(temp_file_path)
-        if not extracted_text:
-            raise HTTPException(status_code=400, detail="Could not extract text from the document or the document is empty.")
-        print(f"Extracted text length: {len(extracted_text)} characters")
+    # --- 3. Add Background Task ---
+    background_tasks.add_task(
+        process_document_background,
+        task_id,  # Pass task ID
+        temp_file_path,  # Pass temp file path
+        file.filename,  # Pass original filename
+    )
+    print(f"Task {task_id} scheduled for file: {file.filename}")
 
-        # --- 3. Summarize Text ---
-        # Limit text sent to summarizer if too long (basic mitigation for now)
-        # A better approach involves chunking in the summarizer service itself.
-        MAX_CHARS_FOR_SUMMARY = 10000 # Example limit, adjust as needed
-        text_to_summarize = extracted_text[:MAX_CHARS_FOR_SUMMARY]
-        if len(extracted_text) > MAX_CHARS_FOR_SUMMARY:
-             print(f"Warning: Input text truncated to {MAX_CHARS_FOR_SUMMARY} chars for summarization.")
+    # --- 4. Return Task ID Immediately ---
+    return {"message": "Processing started.", "task_id": task_id}
 
-        print("Starting summarization...")
-        summary = summarize_text(text_to_summarize) # Using default min/max length from summarizer.py
-        if not summary:
-             raise HTTPException(status_code=500, detail="Failed to generate summary.")
-        print("Summarization complete.")
 
-        # --- 4. Generate PPT ---
-        # (Note: In a real async app, this would happen later)
-        print("Generating PPT...")
-        ppt_filepath = create_summary_ppt(summary, file.filename, OUTPUT_DIRECTORY)
-        print(f"PPT generated at: {ppt_filepath}")
+@app.get("/status/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    Checks the status of a background task.
+    """
+    print(f"Status check requested for task: {task_id}")
+    status_info = task_statuses.get(task_id)
 
-        # --- 5. Return Result (Summary Text for Now) ---
-        # TODO: Next step will be returning the PPT file itself for download.
-        return {
-            "message": "Document processed successfully.",
-            "original_filename": file.filename,
-            "summary": summary,
-            "ppt_generated_at": ppt_filepath # Info for backend log/debug
-        }
+    if not status_info:
+        print(f"Status check failed: Task ID {task_id} not found.")
+        raise HTTPException(status_code=404, detail="Task ID not found")
 
-    except HTTPException as http_exc:
-         # Re-raise HTTPExceptions directly
-         raise http_exc
-    except ValueError as val_err: # Catch specific errors like unsupported file type
-         raise HTTPException(status_code=400, detail=str(val_err))
-    except Exception as e:
-        # Catch-all for other unexpected errors during processing
-        print(f"Error during processing: {e}")
-        # In production, log the full error traceback
-        raise HTTPException(status_code=500, detail=f"An error occurred during processing: {e}")
+    print(f"Current status for task {task_id}: {status_info}")
+    return status_info
 
-    finally:
-        # --- 6. Cleanup ---
-        # Delete the temporary uploaded file after processing
-        if os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-                print(f"Cleaned up temporary file: {temp_file_path}")
-            except OSError as e:
-                print(f"Error deleting temporary file {temp_file_path}: {e}")
-        # We keep the generated PPT for now, but you might add cleanup logic for it later.
 
-# Reminder: Run with 'uvicorn app.main:app --reload --port 8000' from the 'backend' directory
+@app.get("/download/{filename}")
+async def download_ppt(filename: str):
+    """
+    Provides the generated PPT file for download. (No changes needed here)
+    """
+    if ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    file_path = os.path.join(OUTPUT_DIRECTORY, filename)
+
+    if not os.path.exists(file_path):
+        print(f"Download request failed: File not found at {file_path}")
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+    print(f"Providing download for: {file_path}")
+    return FileResponse(
+        path=file_path,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=filename,
+    )
