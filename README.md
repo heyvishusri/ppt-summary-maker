@@ -50,23 +50,24 @@ A web application designed to automatically generate basic PowerPoint presentati
 
 ppt-summary-maker/
 ├── .git/
-├── .gitignore # Top-level ignore rules
+├── .gitignore                      # Top-level ignore rules
 ├── backend/
-│ ├── .env # Backend environment variables (GITIGNORED - Needs Creation)
-│ ├── .gitignore # Backend specific ignore rules
-│ ├── app/ # Main Python application code
-│ │ ├── services/ # Service modules (parser, summarizer, etc.)
-│ │ ├── init.py
-│ │ └── main.py # FastAPI app definition and endpoints
-│ ├── requirements.txt # Python dependencies
-│ └── venv/ # Python virtual environment (GITIGNORED)
+│   ├── .env                        # Backend environment variables (GITIGNORED - Needs Creation)
+│   ├── .gitignore                  # Backend specific ignore rules
+│   ├── app/                        # Main Python application code
+│   │   ├── services/              # Service modules (parser, summarizer, etc.)
+│   │   ├── __init__.py
+│   │   └── main.py                # FastAPI app definition and endpoints
+│   ├── requirements.txt           # Python dependencies
+│   └── venv/                      # Python virtual environment (GITIGNORED)
 └── frontend/
-├── .gitignore # Frontend specific ignore rules
-├── node_modules/ # Frontend dependencies (GITIGNORED)
-├── package.json # Frontend dependencies and scripts
-├── public/ # Static assets (index.html, etc.)
-└── src/ # React source code (App.js, etc.)
-└── README.md # This file
+    ├── .gitignore                 # Frontend specific ignore rules
+    ├── node_modules/             # Frontend dependencies (GITIGNORED)
+    ├── package.json              # Frontend dependencies and scripts
+    ├── public/                   # Static assets (index.html, etc.)
+    └── src/                      # React source code (App.js, etc.)
+└── README.md                     # This file
+
 
 
 ## Prerequisites
