@@ -1,0 +1,10 @@
+for Backend restart
+
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+for frontent
+
+npm start
+
+
+Activate the virtual environment: .\venv\Scripts\activate (if not already active).
